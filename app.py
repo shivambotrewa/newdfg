@@ -1,48 +1,80 @@
-from flask import Flask, request, jsonify
+import os
 import requests
+from flask import Flask, request, jsonify
 from flask_cors import CORS
-import os  # To load environment variables
 
 app = Flask(__name__)
 CORS(app)
 
 # Load the API keys from environment variables
-API_KEY = os.getenv("RAPIDAPI_KEY")
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 FALLBACK_API = os.getenv("FALLBACK_API")
 
-if not API_KEY:
-    raise ValueError("RAPIDAPI_KEY environment variable not set")
+def get_youtube_redirected_url(video_id, itag='140'):
+    """
+    Resolve direct URL using free API
+    """
+    try:
+        initial_url = f"https://qtc.ggt.bz/latest_version?id={video_id}&itag={itag}&local=true"
+        response = requests.head(initial_url, allow_redirects=True)
+        return response.url if response.status_code == 200 else None
+    except Exception as e:
+        print(f"Free API Error: {e}")
+        return None
 
-@app.route('/get_audio_url', methods=['GET'])
-def get_audio_url():
-    # Get the 'v' parameter from the request
-    video_id = request.args.get('v')
-    
-    if not video_id:
-        return jsonify({"error": "Missing 'v' parameter"}), 400
-    
-    # Define the URL and headers
+def get_audio_url_rapidapi(video_id, api_key):
+    """
+    Resolve URL using RapidAPI
+    """
     url = "https://youtube-mp36.p.rapidapi.com/dl"
-    querystring = {"id": video_id}
-
-    # Try with the primary API key
     headers = {
-        "x-rapidapi-key": API_KEY,
+        "x-rapidapi-key": api_key,
         "x-rapidapi-host": "youtube-mp36.p.rapidapi.com"    
     }
+    
+    try:
+        response = requests.get(url, headers=headers, params={"id": video_id})
+        return response.json() if response.status_code == 200 else None
+    except Exception as e:
+        print(f"RapidAPI Error: {e}")
+        return None
 
-    response = requests.get(url, headers=headers, params=querystring)
+@app.route('/audio_url', methods=['GET'])
+def resolve_url():
+    video_id = request.args.get('v')
+    itag = request.args.get('itag', '140')
 
-    # If the primary API key fails, try with the fallback key
-    if response.status_code != 200 and FALLBACK_API:
-        headers["x-rapidapi-key"] = FALLBACK_API
-        response = requests.get(url, headers=headers, params=querystring)
+    if not video_id:
+        return jsonify({"error": "Video ID is required"}), 400
 
-    # Return the JSON response from the external API
-    if response.status_code == 200:
-        return jsonify(response.json())
-    else:
-        return jsonify({"error": "Failed to fetch audio URL"}), response.status_code
+    # First, try free API
+    free_url = get_youtube_redirected_url(video_id, itag)
+    if free_url:
+        return jsonify({
+            "video_id": video_id,
+            "stream_url": free_url,
+            "method": "free_api"
+        })
+
+    # If free API fails and RapidAPI key exists, try RapidAPI
+    if RAPIDAPI_KEY:
+        rapidapi_result = get_audio_url_rapidapi(video_id, RAPIDAPI_KEY)
+        if rapidapi_result:
+            return jsonify({
+                **rapidapi_result,
+                "method": "rapidapi"
+            })
+
+    # If fallback API exists, try with fallback
+    if FALLBACK_API and FALLBACK_API != RAPIDAPI_KEY:
+        rapidapi_fallback_result = get_audio_url_rapidapi(video_id, FALLBACK_API)
+        if rapidapi_fallback_result:
+            return jsonify({
+                **rapidapi_fallback_result,
+                "method": "rapidapi_fallback"
+            })
+
+    return jsonify({"error": "Could not resolve URL"}), 404
 
 if __name__ == '__main__':
-    app.run(debug=True, port=8000)
+    app.run(debug=True,port=8000)
