@@ -39,7 +39,7 @@ def get_audio_url_rapidapi(video_id, api_key):
         print(f"RapidAPI Error: {e}")
         return None
 
-@app.route('/audio_url' || '/get_audio_url', methods=['GET'])
+@app.route('/audio_url', methods=['GET'])
 def resolve_url():
     video_id = request.args.get('v')
     itag = request.args.get('itag', '140')
