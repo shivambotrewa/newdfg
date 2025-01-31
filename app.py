@@ -54,6 +54,7 @@ def resolve_url():
         return jsonify({
             "video_id": video_id,
             "stream_url": free_url,
+            "link": free_url,
             "method": "free_api"
         })
 
