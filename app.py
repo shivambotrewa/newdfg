@@ -1,6 +1,6 @@
 import os
-import time
 import requests
+import re
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -11,54 +11,76 @@ CORS(app)
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 FALLBACK_API = os.getenv("FALLBACK_API")
 
-def get_youtube_redirected_url(video_id, itag='140'):
+def process_video_url(video_id, itag='140'):
     """
-    Resolve direct URL using free API
-    """
-    try:
-        initial_url = f"https://qtc.ggt.bz/latest_version?id={video_id}&itag={itag}&local=true"
-        response = requests.head(initial_url, allow_redirects=True)
-        return response.url if response.status_code == 200 else None
-    except Exception as e:
-        print(f"Free API Error: {e}")
-        return None
+    Fetches video information and returns a processed URL based on the itag.
 
-def get_audio_url_rapidapi(video_id, api_key):
+    Args:
+        video_id (str): The video ID to process
+        itag (str): The itag for the desired format (default is 140 for audio)
+
+    Returns:
+        str: Processed URL with replaced domain or None if unavailable
     """
-    Resolve URL using RapidAPI
-    """
-    url = "https://youtube-mp36.p.rapidapi.com/dl"
-    headers = {
-        "x-rapidapi-key": api_key,
-        "x-rapidapi-host": "youtube-mp36.p.rapidapi.com"    
-    }
-    
+    base_url = "https://invidious.nikkosphere.com/api/v1/videos/"
+    api_url = f"{base_url}{video_id}"
+
     try:
-        response = requests.get(url, headers=headers, params={"id": video_id})
-        return response.json() if response.status_code == 200 else None
+        # Make the API request
+        response = requests.get(api_url)
+        response.raise_for_status()
+        data = response.json()
+
+        # Get adaptiveFormats
+        adaptive_formats = data.get('adaptiveFormats', [])
+
+        # Find matching format based on itag
+        matching_format = next(
+            (format for format in adaptive_formats if str(format.get('itag')) == itag),
+            None
+        )
+
+        if not matching_format:
+            return None
+
+        # Get the URL from matching format
+        url = matching_format.get('url', '')
+
+        # Replace the domain
+        processed_url = re.sub(
+            r'https://[^/]*\.googlevideo\.com',
+            'https://invidious.nikkosphere.com',
+            url
+        )
+
+        return processed_url
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error making API request: {e}")
+        return None
     except Exception as e:
-        print(f"RapidAPI Error: {e}")
+        print(f"Unexpected error: {e}")
         return None
 
 @app.route('/audio_url', methods=['GET'])
 def resolve_url():
     video_id = request.args.get('v')
-    itag = request.args.get('itag', '140')
+    itag = request.args.get('itag', '140')  # Default itag for audio
 
     if not video_id:
         return jsonify({"error": "Video ID is required"}), 400
 
-    # First, try free API
-    free_url = get_youtube_redirected_url(video_id, itag)
-    if free_url:
+    # First, try Invidious API
+    invidious_url = process_video_url(video_id, itag)
+    if invidious_url:
         return jsonify({
             "video_id": video_id,
-            "stream_url": free_url,
-            "link": free_url,
-            "method": "free_api"
+            "stream_url": invidious_url,
+            "link": invidious_url,
+            "method": "invidious_api"
         })
 
-    # If free API fails and RapidAPI key exists, try RapidAPI
+    # If Invidious API fails and RapidAPI key exists, try RapidAPI
     if RAPIDAPI_KEY:
         rapidapi_result = get_audio_url_rapidapi(video_id, RAPIDAPI_KEY)
         if rapidapi_result:
@@ -78,5 +100,22 @@ def resolve_url():
 
     return jsonify({"error": "Could not resolve URL"}), 404
 
+def get_audio_url_rapidapi(video_id, api_key):
+    """
+    Resolve URL using RapidAPI
+    """
+    url = "https://youtube-mp36.p.rapidapi.com/dl"
+    headers = {
+        "x-rapidapi-key": api_key,
+        "x-rapidapi-host": "youtube-mp36.p.rapidapi.com"    
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, params={"id": video_id})
+        return response.json() if response.status_code == 200 else None
+    except Exception as e:
+        print(f"RapidAPI Error: {e}")
+        return None
+
 if __name__ == '__main__':
-    app.run(debug=True,port=8000)
+    app.run(debug=True, port=8000)
