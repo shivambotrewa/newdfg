@@ -7,94 +7,107 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# Load the API keys from environment variables
+# Load API keys from environment variables
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 FALLBACK_API = os.getenv("FALLBACK_API")
 
+INVIDIOUS_APIS = [
+    "https://invidious.nikkosphere.com/api/v1/videos/",
+    "https://id.420129.xyz/api/v1/videos/"
+]
+
+def check_url_status(url):
+    """
+    Checks if a URL is accessible by making a GET request.
+    Uses a User-Agent to bypass restrictions.
+    """
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers, stream=True, allow_redirects=True, timeout=5)
+        return response.status_code
+    except requests.RequestException:
+        return None  # Return None if any request error occurs
+
 def process_video_url(video_id, itag='140'):
     """
-    Fetches video information and returns a processed URL based on the itag.
-
-    Args:
-        video_id (str): The video ID to process
-        itag (str): The itag for the desired format (default is 140 for audio)
-
-    Returns:
-        str: Processed URL with replaced domain or None if unavailable
+    Tries multiple Invidious APIs to fetch a working processed URL for a given itag.
     """
-    base_url = "https://invidious.nikkosphere.com/api/v1/videos/"
-    api_url = f"{base_url}{video_id}"
+    for base_url in INVIDIOUS_APIS:
+        api_url = f"{base_url}{video_id}"
+        try:
+            response = requests.get(api_url)
+            response.raise_for_status()
+            data = response.json()
 
-    try:
-        # Make the API request
-        response = requests.get(api_url)
-        response.raise_for_status()
-        data = response.json()
+            # Get adaptiveFormats
+            adaptive_formats = data.get('adaptiveFormats', [])
 
-        # Get adaptiveFormats
-        adaptive_formats = data.get('adaptiveFormats', [])
+            # Find matching format based on itag
+            matching_format = next(
+                (format for format in adaptive_formats if str(format.get('itag')) == str(itag)),
+                None
+            )
 
-        # Find matching format based on itag
-        matching_format = next(
-            (format for format in adaptive_formats if str(format.get('itag')) == itag),
-            None
-        )
+            if not matching_format:
+                continue  # Try next Invidious API
 
-        if not matching_format:
-            return None
+            # Get the URL from matching format
+            url = matching_format.get('url', '')
 
-        # Get the URL from matching format
-        url = matching_format.get('url', '')
+            # Replace the domain dynamically
+            processed_url = re.sub(
+                r'https://[^/]*\.googlevideo\.com',
+                base_url.replace("/api/v1/videos/", ""),
+                url
+            )
 
-        # Replace the domain
-        processed_url = re.sub(
-            r'https://[^/]*\.googlevideo\.com',
-            'https://invidious.nikkosphere.com',
-            url
-        )
+            # ✅ Check if processed_url is actually accessible
+            status_code = check_url_status(processed_url)
+            if status_code == 200:
+                return processed_url  # Return working URL
 
-        return processed_url
+        except requests.exceptions.RequestException as e:
+            print(f"Error making API request to {base_url}: {e}")
 
-    except requests.exceptions.RequestException as e:
-        print(f"Error making API request: {e}")
-        return None
-    except Exception as e:
-        print(f"Unexpected error: {e}")
-        return None
+    return None  # Return None if all Invidious APIs fail
 
 @app.route('/audio_url', methods=['GET'])
 def resolve_url():
     video_id = request.args.get('v')
-    itag = request.args.get('itag', '140')  # Default itag for audio
+    itag = request.args.get('itag', '140')  # Default to itag 140 if not provided
 
     if not video_id:
         return jsonify({"error": "Video ID is required"}), 400
 
-    # First, try Invidious API
+    # First, try Invidious APIs
     invidious_url = process_video_url(video_id, itag)
     if invidious_url:
         return jsonify({
             "video_id": video_id,
             "stream_url": invidious_url,
-            "link": invidious_url,
+            "itag": itag,
             "method": "invidious_api"
         })
 
-    # If Invidious API fails and RapidAPI key exists, try RapidAPI
+    # If Invidious APIs fail and RapidAPI key exists, try RapidAPI
     if RAPIDAPI_KEY:
         rapidapi_result = get_audio_url_rapidapi(video_id, RAPIDAPI_KEY)
         if rapidapi_result:
             return jsonify({
                 **rapidapi_result,
+                "itag": itag,
                 "method": "rapidapi"
             })
 
-    # If fallback API exists, try with fallback
+    # If fallback API exists, try fallback
     if FALLBACK_API and FALLBACK_API != RAPIDAPI_KEY:
         rapidapi_fallback_result = get_audio_url_rapidapi(video_id, FALLBACK_API)
         if rapidapi_fallback_result:
             return jsonify({
                 **rapidapi_fallback_result,
+                "itag": itag,
                 "method": "rapidapi_fallback"
             })
 
