@@ -12,7 +12,7 @@ RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 FALLBACK_API = os.getenv("FALLBACK_API")
 
 # URL to fetch dynamic Invidious instances
-DYNAMIC_INVIDIOUS_URL = "https://raw.githubusercontent.com/n-ce/Uma/refs/heads/main/dynamic_instances.json"
+DYNAMIC_INVIDIOUS_URL = "https://raw.githubusercontent.com/NitinBot001/Uma/refs/heads/main/dynamic_instances.json"
 
 # Global variable to store cached Invidious API URLs
 INVIDIOUS_API_CACHE = []
