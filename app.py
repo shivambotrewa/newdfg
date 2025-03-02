@@ -11,10 +11,34 @@ CORS(app)
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 FALLBACK_API = os.getenv("FALLBACK_API")
 
-INVIDIOUS_APIS = [
-    "https://invidious.nikkosphere.com/api/v1/videos/",
-    "https://id.420129.xyz/api/v1/videos/"
-]
+# URL to fetch dynamic Invidious instances
+DYNAMIC_INVIDIOUS_URL = "https://raw.githubusercontent.com/n-ce/Uma/refs/heads/main/dynamic_instances.json"
+
+# Global variable to store cached Invidious API URLs
+INVIDIOUS_API_CACHE = []
+
+def fetch_invidious_instances():
+    """
+    Fetches the list of Invidious instances dynamically from the JSON file.
+    Returns a list of Invidious API base URLs.
+    """
+    try:
+        response = requests.get(DYNAMIC_INVIDIOUS_URL)
+        response.raise_for_status()
+        data = response.json()
+        invidious_instances = data.get("invidious", [])
+        return [f"{instance}/api/v1/videos/" for instance in invidious_instances]
+    except requests.RequestException as e:
+        print(f"Error fetching dynamic Invidious instances: {e}")
+        return []
+
+def refresh_invidious_cache():
+    """
+    Refreshes the cached list of Invidious API URLs.
+    """
+    global INVIDIOUS_API_CACHE
+    INVIDIOUS_API_CACHE = fetch_invidious_instances()
+    print("Refreshed Invidious API cache:", INVIDIOUS_API_CACHE)
 
 def is_url_accessible(url):
     """
@@ -33,8 +57,21 @@ def is_url_accessible(url):
 def process_video_url(video_id, itag='140'):
     """
     Tries multiple Invidious APIs to fetch a working processed URL for a given itag.
+    Uses cached URLs and refreshes the cache if all URLs fail or cache is empty.
     """
-    for base_url in INVIDIOUS_APIS:
+    global INVIDIOUS_API_CACHE
+
+    # If cache is empty, refresh it
+    if not INVIDIOUS_API_CACHE:
+        refresh_invidious_cache()
+
+    # If cache is still empty after refresh, return None
+    if not INVIDIOUS_API_CACHE:
+        print("No Invidious API URLs available in cache.")
+        return None
+
+    # Try each URL in the cache
+    for base_url in INVIDIOUS_API_CACHE[:]:  # Use a copy of the list to avoid modifying it during iteration
         api_url = f"{base_url}{video_id}"
         try:
             response = requests.get(api_url)
@@ -69,8 +106,20 @@ def process_video_url(video_id, itag='140'):
 
         except requests.exceptions.RequestException as e:
             print(f"Error making API request to {base_url}: {e}")
+            # Remove the failed URL from the cache
+            INVIDIOUS_API_CACHE.remove(base_url)
 
-    return None  # Return None if all Invidious APIs fail
+    # If all URLs fail, refresh the cache and try again
+    if INVIDIOUS_API_CACHE:  # If cache is not empty, try again
+        return process_video_url(video_id, itag)
+    else:
+        # If cache is empty, refresh it and try again
+        refresh_invidious_cache()
+        if INVIDIOUS_API_CACHE:
+            return process_video_url(video_id, itag)
+        else:
+            print("All Invidious API URLs failed, and cache could not be refreshed.")
+            return None
 
 def get_audio_url_cobalt(video_id):
     """
@@ -177,4 +226,6 @@ def resolve_url():
     return jsonify({"error": "Could not resolve URL"}), 404
 
 if __name__ == '__main__':
+    # Fetch Invidious API URLs at startup
+    refresh_invidious_cache()
     app.run(debug=True, port=8000)
