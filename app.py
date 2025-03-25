@@ -1,7 +1,6 @@
 import os
 import requests
 import re
-import threading
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -41,39 +40,24 @@ def refresh_invidious_cache():
     INVIDIOUS_API_CACHE = fetch_invidious_instances()
     print("Refreshed Invidious API cache:", INVIDIOUS_API_CACHE)
 
-def schedule_invidious_refresh():
-    """
-    Schedules the Invidious cache refresh to run every 15 minutes.
-    """
-    refresh_invidious_cache()  # Refresh immediately
-    # Schedule the next refresh in 15 minutes (900 seconds)
-    timer = threading.Timer(900, schedule_invidious_refresh)
-    timer.daemon = True  # Ensures the timer stops when the main program exits
-    timer.start()
-
 def is_url_accessible(url):
     """
-    Checks if a URL is accessible by making a GET request and verifying content.
-    Returns True if the status code is 200 and content is served, otherwise False.
+    Checks if a URL is accessible by making a HEAD request.
+    Returns True if the status code is 200, otherwise False.
     """
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        with requests.get(url, headers=headers, allow_redirects=True, timeout=5, stream=True) as response:
-            if response.status_code == 200:
-                # Try to read the first byte to confirm the server is serving content
-                first_byte = next(response.iter_content(chunk_size=1), None)
-                if first_byte is not None:
-                    return True
-        return False
+        response = requests.head(url, headers=headers, allow_redirects=True, timeout=5)
+        return response.status_code == 200
     except requests.RequestException:
         return False
 
-def process_video_url(video_id, itag='140', max_retries=1):
+def process_video_url(video_id, itag='140'):
     """
     Tries multiple Invidious APIs to fetch a working processed URL for a given itag.
-    Uses cached URLs and refreshes the cache up to max_retries times if all URLs fail.
+    Uses cached URLs and refreshes the cache if all URLs fail or cache is empty.
     """
     global INVIDIOUS_API_CACHE
 
@@ -125,14 +109,17 @@ def process_video_url(video_id, itag='140', max_retries=1):
             # Remove the failed URL from the cache
             INVIDIOUS_API_CACHE.remove(base_url)
 
-    # If retries remain, refresh the cache and try again
-    if max_retries > 0:
+    # If all URLs fail, refresh the cache and try again
+    if INVIDIOUS_API_CACHE:  # If cache is not empty, try again
+        return process_video_url(video_id, itag)
+    else:
+        # If cache is empty, refresh it and try again
         refresh_invidious_cache()
         if INVIDIOUS_API_CACHE:
-            return process_video_url(video_id, itag, max_retries - 1)
-    # If no retries left or cache is empty, give up
-    print("All Invidious API URLs failed after retries.")
-    return None
+            return process_video_url(video_id, itag)
+        else:
+            print("All Invidious API URLs failed, and cache could not be refreshed.")
+            return None
 
 def get_audio_url_cobalt(video_id):
     """
@@ -239,7 +226,6 @@ def resolve_url():
     return jsonify({"error": "Could not resolve URL"}), 404
 
 if __name__ == '__main__':
-    # Start the periodic Invidious cache refresh (every 15 minutes)
-    schedule_invidious_refresh()
-    # Run the Flask app
+    # Fetch Invidious API URLs at startup
+    refresh_invidious_cache()
     app.run(debug=True, port=8000)
