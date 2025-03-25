@@ -1,6 +1,7 @@
 import os
 import requests
 import re
+import threading
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -40,24 +41,45 @@ def refresh_invidious_cache():
     INVIDIOUS_API_CACHE = fetch_invidious_instances()
     print("Refreshed Invidious API cache:", INVIDIOUS_API_CACHE)
 
+def schedule_invidious_refresh():
+    """
+    Schedules the Invidious cache refresh to run every 15 minutes.
+    """
+    refresh_invidious_cache()  # Refresh immediately
+    timer = threading.Timer(900, schedule_invidious_refresh)
+    timer.daemon = True  # Ensures the timer stops when the main program exits
+    timer.start()
+
 def is_url_accessible(url):
     """
-    Checks if a URL is accessible by making a HEAD request.
-    Returns True if the status code is 200, otherwise False.
+    Checks if a URL is accessible by making a GET request and verifying content.
+    Returns True if the status code is 200 and content is served, otherwise False.
     """
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        response = requests.head(url, headers=headers, allow_redirects=True, timeout=5)
-        return response.status_code == 200
-    except requests.RequestException:
+        with requests.get(url, headers=headers, allow_redirects=True, timeout=5, stream=True) as response:
+            print(f"Checking accessibility of URL: {url} - Status: {response.status_code}")
+            if response.status_code == 200:
+                # Try to read the first byte to confirm the server is serving content
+                first_byte = next(response.iter_content(chunk_size=1), None)
+                if first_byte is not None:
+                    print(f"URL {url} is accessible (first byte received)")
+                    return True
+                else:
+                    print(f"URL {url} returned 200 but no content")
+            else:
+                print(f"URL {url} returned non-200 status: {response.status_code}")
+        return False
+    except requests.RequestException as e:
+        print(f"URL {url} inaccessible due to exception: {e}")
         return False
 
-def process_video_url(video_id, itag='140'):
+def process_video_url(video_id, itag='140', max_retries=1):
     """
     Tries multiple Invidious APIs to fetch a working processed URL for a given itag.
-    Uses cached URLs and refreshes the cache if all URLs fail or cache is empty.
+    Uses cached URLs and refreshes the cache up to max_retries times if all URLs fail.
     """
     global INVIDIOUS_API_CACHE
 
@@ -80,6 +102,7 @@ def process_video_url(video_id, itag='140'):
 
             # Get adaptiveFormats
             adaptive_formats = data.get('adaptiveFormats', [])
+            print(f"Fetched adaptive formats from {base_url} for video {video_id}")
 
             # Find matching format based on itag
             matching_format = next(
@@ -88,10 +111,12 @@ def process_video_url(video_id, itag='140'):
             )
 
             if not matching_format:
+                print(f"No matching format for itag {itag} at {base_url}")
                 continue  # Try next Invidious API
 
             # Get the URL from matching format
             url = matching_format.get('url', '')
+            print(f"Raw URL from Invidious: {url}")
 
             # Replace the domain dynamically
             processed_url = re.sub(
@@ -99,27 +124,29 @@ def process_video_url(video_id, itag='140'):
                 base_url.replace("/api/v1/videos/", ""),
                 url
             )
+            print(f"Processed URL: {processed_url}")
 
-            # Check if processed_url is accessible
+            # Check if processed_url is accessible using is_url_accessible
             if is_url_accessible(processed_url):
+                print(f"Returning accessible URL: {processed_url}")
                 return processed_url  # Return working URL
+            else:
+                print(f"Processed URL {processed_url} is not accessible, trying next instance")
 
         except requests.exceptions.RequestException as e:
             print(f"Error making API request to {base_url}: {e}")
             # Remove the failed URL from the cache
             INVIDIOUS_API_CACHE.remove(base_url)
 
-    # If all URLs fail, refresh the cache and try again
-    if INVIDIOUS_API_CACHE:  # If cache is not empty, try again
-        return process_video_url(video_id, itag)
-    else:
-        # If cache is empty, refresh it and try again
+    # If retries remain, refresh the cache and try again
+    if max_retries > 0:
+        print(f"Retrying with refreshed cache, retries left: {max_retries}")
         refresh_invidious_cache()
         if INVIDIOUS_API_CACHE:
-            return process_video_url(video_id, itag)
-        else:
-            print("All Invidious API URLs failed, and cache could not be refreshed.")
-            return None
+            return process_video_url(video_id, itag, max_retries - 1)
+    # If no retries left or cache is empty, give up
+    print("All Invidious API URLs failed after retries.")
+    return None
 
 def get_audio_url_cobalt(video_id):
     """
@@ -226,6 +253,7 @@ def resolve_url():
     return jsonify({"error": "Could not resolve URL"}), 404
 
 if __name__ == '__main__':
-    # Fetch Invidious API URLs at startup
-    refresh_invidious_cache()
+    # Start the periodic Invidious cache refresh (every 15 minutes)
+    schedule_invidious_refresh()
+    # Run the Flask app
     app.run(debug=True, port=8000)
