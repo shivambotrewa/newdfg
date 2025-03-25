@@ -46,6 +46,7 @@ def schedule_invidious_refresh():
     Schedules the Invidious cache refresh to run every 15 minutes.
     """
     refresh_invidious_cache()  # Refresh immediately
+    # Schedule the next refresh in 15 minutes (900 seconds)
     timer = threading.Timer(900, schedule_invidious_refresh)
     timer.daemon = True  # Ensures the timer stops when the main program exits
     timer.start()
@@ -60,20 +61,13 @@ def is_url_accessible(url):
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
         with requests.get(url, headers=headers, allow_redirects=True, timeout=5, stream=True) as response:
-            print(f"Checking accessibility of URL: {url} - Status: {response.status_code}")
             if response.status_code == 200:
                 # Try to read the first byte to confirm the server is serving content
                 first_byte = next(response.iter_content(chunk_size=1), None)
                 if first_byte is not None:
-                    print(f"URL {url} is accessible (first byte received)")
                     return True
-                else:
-                    print(f"URL {url} returned 200 but no content")
-            else:
-                print(f"URL {url} returned non-200 status: {response.status_code}")
         return False
-    except requests.RequestException as e:
-        print(f"URL {url} inaccessible due to exception: {e}")
+    except requests.RequestException:
         return False
 
 def process_video_url(video_id, itag='140', max_retries=1):
@@ -102,7 +96,6 @@ def process_video_url(video_id, itag='140', max_retries=1):
 
             # Get adaptiveFormats
             adaptive_formats = data.get('adaptiveFormats', [])
-            print(f"Fetched adaptive formats from {base_url} for video {video_id}")
 
             # Find matching format based on itag
             matching_format = next(
@@ -111,12 +104,10 @@ def process_video_url(video_id, itag='140', max_retries=1):
             )
 
             if not matching_format:
-                print(f"No matching format for itag {itag} at {base_url}")
                 continue  # Try next Invidious API
 
             # Get the URL from matching format
             url = matching_format.get('url', '')
-            print(f"Raw URL from Invidious: {url}")
 
             # Replace the domain dynamically
             processed_url = re.sub(
@@ -124,14 +115,10 @@ def process_video_url(video_id, itag='140', max_retries=1):
                 base_url.replace("/api/v1/videos/", ""),
                 url
             )
-            print(f"Processed URL: {processed_url}")
 
-            # Check if processed_url is accessible using is_url_accessible
+            # Check if processed_url is accessible
             if is_url_accessible(processed_url):
-                print(f"Returning accessible URL: {processed_url}")
                 return processed_url  # Return working URL
-            else:
-                print(f"Processed URL {processed_url} is not accessible, trying next instance")
 
         except requests.exceptions.RequestException as e:
             print(f"Error making API request to {base_url}: {e}")
@@ -140,7 +127,6 @@ def process_video_url(video_id, itag='140', max_retries=1):
 
     # If retries remain, refresh the cache and try again
     if max_retries > 0:
-        print(f"Retrying with refreshed cache, retries left: {max_retries}")
         refresh_invidious_cache()
         if INVIDIOUS_API_CACHE:
             return process_video_url(video_id, itag, max_retries - 1)
