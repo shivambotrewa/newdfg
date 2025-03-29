@@ -1,8 +1,10 @@
 from flask import Flask, request, jsonify
+from flask_cors imoprt CORS
 import requests
 import json
 
 app = Flask(__name__)
+CORS(app)
 
 # Define the YouTube API endpoint and default parameters
 YOUTUBE_API_URL = "https://www.youtube.com/youtubei/v1/player"
@@ -78,7 +80,7 @@ def get_audio_url():
             data = response.json()
             # Extract the first audio format with mimeType starting with "audio/mp4"
             for format in data.get('streamingData', {}).get('adaptiveFormats', []):
-                if format.get('mimeType', '').startswith('audio/mp4'):
+                if format.get('itag') == 139:
                     return jsonify({
                         'status': 'success',
                         "video_id": video_id,
