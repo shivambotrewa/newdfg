@@ -1,13 +1,14 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request
 import requests
 from urllib.parse import urlparse, parse_qs
+import threading
 import time
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
-# Global variables (refreshed on-demand in serverless)
+# Global variables
 invidious_urls = []
 last_refresh_time = 0
 REFRESH_INTERVAL = 15 * 60  # 15 minutes in seconds
@@ -21,19 +22,26 @@ def extract_videoplayback_params(url):
 def fetch_invidious_urls():
     url = "https://raw.githubusercontent.com/NitinBot001/Uma/refs/heads/main/dynamic_instances.json"
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url)
         if response.status_code == 200:
             data = response.json()
             return data.get("invidious", [])
         return []
-    except requests.RequestException as e:
-        print(f"Error fetching Invidious URLs: {str(e)}")
+    except requests.RequestException:
         return []
+
+def refresh_urls():
+    global invidious_urls, last_refresh_time
+    while True:
+        invidious_urls = fetch_invidious_urls()
+        last_refresh_time = time.time()
+        print(f"URLs refreshed at {time.ctime()}. Found {len(invidious_urls)} instances")
+        time.sleep(REFRESH_INTERVAL)
 
 def get_audio_url(video_id):
     global invidious_urls, last_refresh_time
     
-    # Refresh URLs if stale or empty
+    # If URLs haven't been initialized or it's been too long, refresh immediately
     if not invidious_urls or (time.time() - last_refresh_time > REFRESH_INTERVAL):
         invidious_urls = fetch_invidious_urls()
         last_refresh_time = time.time()
@@ -50,12 +58,11 @@ def get_audio_url(video_id):
                 adaptive_formats = data.get("adaptiveFormats", [])
                 for format in adaptive_formats:
                     itag = format.get("itag")
-                    if itag in [140, 139, 251]:
+                    if itag == 140 or 139 or 251:
                         audio_url = format.get("url")
                         proxy_url = f"{base_url}/{extract_videoplayback_params(audio_url)}"
                         return proxy_url, itag, None
-        except requests.RequestException as e:
-            print(f"Error accessing {api_url}: {str(e)}")
+        except requests.RequestException:
             continue
     
     return None, None, "No suitable accessible audio URL found"
@@ -70,7 +77,7 @@ def audio_url():
     
     if error:
         return jsonify({"error": error}), 404
-    
+        
     return jsonify({
         "video_id": video_id,
         "stream_url": stream_url,
@@ -78,11 +85,13 @@ def audio_url():
         "method": "invidious_api"
     })
 
-# For Vercel: Export the app as a serverless function
-handler = app
-
-# For local testing only
 if __name__ == '__main__':
+    # Start the background refresh thread
+    refresh_thread = threading.Thread(target=refresh_urls, daemon=True)
+    refresh_thread.start()
+    
+    # Initial fetch
     invidious_urls = fetch_invidious_urls()
     last_refresh_time = time.time()
-    app.run(debug=True, port=8000)
+    
+    app.run(debug=True, host='0.0.0.0', port=8000)
