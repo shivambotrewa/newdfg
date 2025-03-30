@@ -1,9 +1,12 @@
+from flask import Flask, request
 import requests
 from urllib.parse import urlparse, parse_qs
 import threading
 import time
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
 # Global variables
 invidious_urls = []
