@@ -83,7 +83,7 @@ def process_video_url(video_id, itag='140'):
 
             # Find matching format based on itag
             matching_format = next(
-                (format for format in adaptive_formats if str(format.get('itag')) == str(itag)),
+                (format for format in adaptive_formats if str(format.get('itag')) == int(itag)),
                 None
             )
 
