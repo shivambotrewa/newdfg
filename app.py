@@ -1,4 +1,4 @@
-from flask import Flask, request
+from flask import Flask, request, jsonify
 import requests
 from urllib.parse import urlparse, parse_qs
 import threading
