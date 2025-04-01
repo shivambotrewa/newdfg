@@ -38,7 +38,8 @@ def is_url_accessible(url):
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
         response = requests.head(url, headers=headers, allow_redirects=True)
-        return True
+        if response.status_code == 200:
+            return True
     except requests.RequestException:
         return False
 
