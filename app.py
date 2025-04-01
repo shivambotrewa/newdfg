@@ -20,15 +20,27 @@ def extract_videoplayback_params(url):
     return "videoplayback?" + "&".join([f"{key}={value}" for key, value in videoplayback_params.items()])
 
 def fetch_invidious_urls():
-    url = "https://raw.githubusercontent.com/NitinBot001/Uma/refs/heads/main/dynamic_instances.json"
-    try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            data = response.json()
-            return data.get("invidious", [])
-        return []
-    except requests.RequestException:
-        return []
+    # Define both URLs as constants
+    URL_1 = "https://raw.githubusercontent.com/NitinBot001/Uma/refs/heads/main/dynamic_instances.json"
+    URL_2 = "https://raw.githubusercontent.com/n-ce/Uma/refs/heads/main/dynamic_instances.json"
+    
+    # List to store all unique instances
+    all_instances = set()
+    
+    # Try fetching from both URLs
+    for url in [URL_1, URL_2]:
+        try:
+            response = requests.get(url)
+            if response.status_code == 200:
+                data = response.json()
+                # Add instances from this URL to the set
+                instances = data.get("invidious", [])
+                all_instances.update(instances)
+        except requests.RequestException:
+            continue
+    
+    # Convert set back to list and return
+    return list(all_instances)
 
 def refresh_urls():
     global invidious_urls, last_refresh_time
