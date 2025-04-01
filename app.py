@@ -28,10 +28,26 @@ RAPIDAPI_HEADERS_2 = {
     "x-rapidapi-host": "youtube-mp36.p.rapidapi.com"
 }
 
+def is_url_accessible(url):
+    """
+    Checks if a URL is accessible by making a HEAD request.
+    Returns True if the status code is 200, otherwise False.
+    """
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        response = requests.head(url, headers=headers, allow_redirects=True)
+        return True
+    except requests.RequestException:
+        return False
+
+
 def extract_videoplayback_params(url):
     parsed_url = urlparse(url)
     query_params = parse_qs(parsed_url.query)
     videoplayback_params = {key: value[0] for key, value in query_params.items()}
+    print(videoplayback_params)
     return "videoplayback?" + "&".join([f"{key}={value}" for key, value in videoplayback_params.items()])
 
 def fetch_invidious_urls():
@@ -46,6 +62,7 @@ def fetch_invidious_urls():
                 data = response.json()
                 instances = data.get("invidious", [])
                 all_instances.update(instances)
+                print(all_instances)
         except requests.RequestException:
             continue
     
@@ -72,16 +89,21 @@ def get_audio_url(video_id):
         for base_url in invidious_urls:
             api_url = f"{base_url}/api/v1/videos/{video_id}"
             try:
-                response = requests.get(api_url, timeout=5)
+                response = requests.get(api_url)
+                # print(response)
                 if response.status_code == 200:
                     data = response.json()
+                    # print(data)
                     adaptive_formats = data.get("adaptiveFormats", [])
                     for format in adaptive_formats:
+                        # print(format)
                         itag = format.get("itag")
-                        if itag in [140, 139, 251]:
+                        if itag == 140 or 139 or 251:
                             audio_url = format.get("url")
                             proxy_url = f"{base_url}/{extract_videoplayback_params(audio_url)}"
-                            return proxy_url, itag, None, "invidious_api"
+                            if is_url_accessible(proxy_url):
+                                # print(proxy_url)
+                                return proxy_url, itag, None, "invidious_api"
             except requests.RequestException:
                 continue
     
