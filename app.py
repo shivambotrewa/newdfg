@@ -159,6 +159,7 @@ def audio_url():
         "method": method or "unknown",
         "stream_url": stream_url,
         "status": 200,
+        "link": stream_url,
         "video_id": video_id,
         "itag": itag
     })
